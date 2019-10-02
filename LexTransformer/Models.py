@@ -30,7 +30,7 @@ class Encoder(nn.Module):
             self.include_lex = True
             print('Initializing LexTransformer!')
             self.transformers = nn.ModuleList([LexiconTransformerEncoder(num_head=num_head, 
-                                              d_x=emb_dim, d_k=d_k, 
+                                              d_x=emb_dim, d_k=d_k, d_kl=d_kl, 
                                               d_linear=d_linear,
                                               dropout=dropout) for i in range(num_layer)])
             
