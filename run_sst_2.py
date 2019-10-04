@@ -1,7 +1,8 @@
 import pickle
 import torch
 import torch.optim
-
+import random
+import numpy as np
 
 from config import PAD
 from hyper_params import args
