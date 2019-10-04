@@ -98,6 +98,11 @@ class LexiconTransformerClassifier(nn.Module):
         
         self.length = length
         self.emb_dim = emb_dim
+        if d_kl is None:
+            self.include_lex = False
+        else:
+            self.include_lex = True
+            
         
         self.encoder = Encoder(length=length, 
                                emb_dim=emb_dim, 
