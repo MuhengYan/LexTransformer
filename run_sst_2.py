@@ -18,12 +18,11 @@ from utils.train import train_epoch, eval_epoch
 # from LexTransformer.Encoders import LexiconTransformerEncoder
 from LexTransformer.Models import LexiconTransformerClassifier
 
-def set_seed(args):
-    random.seed(args.seed)
-    np.random.seed(args.seed)
-    torch.manual_seed(args.seed)
-    if args.n_gpu > 0:
-        torch.cuda.manual_seed_all(args.seed)
+def set_seed(seed):
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
         
         
 
@@ -31,6 +30,8 @@ def set_seed(args):
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print('Model is running on:', device, '!')
 print()
+
+set_seed(123)
 
 word2idx, idx2word, embeddings = load_embeddings(args['embedding_loc'])
 batch_size = args['batch_size']
@@ -92,7 +93,9 @@ optimizer = TransformerOptimizer(optimizer=base_optimizer,
 
 manager = TrainingManager(tolerance=args['tolerance'])
 
-
+model = model.to(device)
+print(model)
+print()
 
 for ep in range(1, args['max_epoch']):
     train_loss, train_acc = train_epoch(model=model,

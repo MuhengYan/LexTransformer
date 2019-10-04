@@ -1,6 +1,6 @@
 args = {
     'dataset_name': 'dev_test',
-    'experiment_name': 'proto',
+    'experiment_name': 'sst_2_class',
     
     #pre-trained embedding
     'embedding_loc': 'sst_google',
@@ -11,12 +11,12 @@ args = {
     'batch_size': 16,
     
     #transformer
-    'transformer_layers': 6,
+    'transformer_layers': 3,
     'num_heads': 8,
     
-    'sequence_attn_dim': 64,
+    'sequence_attn_dim': 150,
     'lex_attn_dim': None, #set to None if no lex
-    'feed_forward_dim': 64,
+    'feed_forward_dim': 150,
 
     #general
     'alpha': 0.5,
