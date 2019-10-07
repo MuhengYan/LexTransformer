@@ -1,5 +1,4 @@
 import pickle
-import os
 import torch
 import torch.optim
 import random
@@ -24,16 +23,12 @@ def set_seed(seed):
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
-    #torch.cuda.manual_seed_all(seed)
+    torch.cuda.manual_seed_all(seed)
         
         
 
-gpu_num = args['gpu_num']
-
-os.environ["CUDA_VISIBLE_DEVICES"] = '{}'.format(gpu_num)
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
 print('Model is running on:', device, '!')
 print()
 
@@ -91,17 +86,15 @@ model = LexiconTransformerClassifier(length=args['seq_length'],
 
 params = filter(lambda p: p.requires_grad, model.parameters())
 
-base_optimizer = torch.optim.Adam(params, betas=(0.9, 0.98), eps=1e-9) #copying transformer settings
+#base_optimizer = torch.optim.Adam(params, betas=(0.9, 0.98), eps=1e-9) #copying transformer settings
 
-optimizer = TransformerOptimizer(optimizer=base_optimizer, 
-                                 d_model=args['embedding_dim'],
-                                 warmup_steps=args['warmup_steps'])
+#optimizer = TransformerOptimizer(optimizer=base_optimizer, 
+#                                 d_model=args['embedding_dim'],
+#                                 warmup_steps=args['warmup_steps'])
+
+optimizer = torch.optim.Adadelta(params, rho=0.95, lr=0.05)
 
 manager = TrainingManager(tolerance=args['tolerance'])
-
-#if torch.cuda.device_count() > 1:
-#    print("Let's use", torch.cuda.device_count() - 1, "GPUs!")
-#    model = nn.DataParallel(model)
 
 model = model.to(device)
 print(model)
@@ -138,4 +131,3 @@ for ep in range(1, args['max_epoch']):
         print('best:', manager.best_score)
         break
         
-

@@ -39,7 +39,8 @@ class Encoder(nn.Module):
     def forward(self, X, z=None, context_mask=None):
 
         embedded = self.embed(X) + self.pos_embed(X, 'seq')
-        
+        #embedded = self.embed(X)
+
         pad_mask = self.masking(X, X)
         
         if z is not None:
@@ -115,15 +116,16 @@ class LexiconTransformerClassifier(nn.Module):
                                alpha=alpha, 
                                dropout=dropout)
 
-        self.dense_layer = DenseLayers(dim=length*emb_dim, n_logits=n_logits)
-        
+#        self.dense_layer = DenseLayers(dim=length*emb_dim, n_logits=n_logits)
+        self.dense_layer = DenseLayers(dim=emb_dim, n_logits=n_logits)
 
     def forward(self, X, z=None, context_mask=None):
         encoded, attn_con, attn_lex = self.encoder(X=X, z=z, 
-                                                   context_mask=context_mask)
+                                                   context_mask=context_mask) #batch * length * emb_dim
         
-        encoded = encoded.view(-1, self.length * self.emb_dim) #batch * (length*emb_dim)
-        
+#        encoded = encoded.view(-1, self.length * self.emb_dim) #batch * (length*emb_dim)
+        encoded = torch.mean(encoded, dim=1)
+
         logits = self.dense_layer(encoded)
         
         return logits, attn_con, attn_lex

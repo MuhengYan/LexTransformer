@@ -61,7 +61,7 @@ class PosEmbed(nn.Module):
                 
             batch.append(torch.from_numpy(np.array(word_pos)).type(torch.LongTensor))
         batch = torch.cat(batch).view(-1, self.length)        
-        return batch
+        return batch.to('cuda')
 
     
     def forward(self, X, mode='seq'):
@@ -126,9 +126,13 @@ class MultiHeadAttention(nn.Module):
         
         self.wq = nn.Linear(d_x, num_head * d_k)
         self.wk = nn.Linear(d_x, num_head * d_k)
-        self.wv = nn.Linear(d_x, num_head * d_k)    
+        self.wv = nn.Linear(d_x, num_head * d_k)
+
         
         #initialization problems?
+#        nn.init.normal_(self.wq.weight, mean=0, std=np.sqrt(2.0 / (d_x + d_k)))
+#        nn.init.normal_(self.wk.weight, mean=0, std=np.sqrt(2.0 / (d_x + d_k)))
+#        nn.init.normal_(self.wv.weight, mean=0, std=np.sqrt(2.0 / (d_x + d_k)))
         
         self.sdp_attn = ScaledDotProductAttention(d_k=d_k, dropout=dropout)
         
@@ -136,7 +140,7 @@ class MultiHeadAttention(nn.Module):
         self.norm = nn.LayerNorm(d_x)
         
         self.wo = nn.Linear(num_head * d_k, d_x)
-#         nn.init.xavier_normal_(self.wo.weight)
+        nn.init.xavier_normal_(self.wo.weight)
         
     
     def forward(self, q, k, v, pad_mask=None):

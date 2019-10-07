@@ -4,6 +4,7 @@ import pickle
 import sys
 import numpy as np
 import torch
+from torch import nn
 import torch.nn.functional as F
 
 from config import TRAINED_PATH
@@ -14,6 +15,7 @@ class TransformerOptimizer():
     def __init__(self, optimizer, d_model, warmup_steps):
         self.optimizer = optimizer
         self.static_lr = np.power(d_model, -0.5)
+#        self.static_lr = 0.1
         self.warmup_steps = warmup_steps
         
         self.num_step = 1
@@ -28,6 +30,7 @@ class TransformerOptimizer():
     def _adjust_learning_rate(self):
         lr = self.static_lr * min(np.power(self.num_step, -0.5), 
                                   (self.num_step * np.power(self.warmup_steps, -1.5)))
+#        lr = self.static_lr
         for param_group in self.optimizer.param_groups:
             param_group['lr'] = lr
             
@@ -59,7 +62,13 @@ def train_epoch(model, optimizer, loader, epoch, device):
         
         X = batch[0].to(device)
         y = batch[1].to(device)
-        if model.include_lex:
+        
+        if isinstance(model, nn.DataParallel):
+            inc_lex = model.module.include_lex
+        else:
+            inc_lex = model.include_lex
+
+        if inc_lex:
             z = batch[2].to(device)
         else:
             z = None
@@ -95,7 +104,17 @@ def eval_epoch(model, loader, epoch, device):
         
         X = batch[0].to(device)
         y = batch[1].to(device)
-        if model.include_lex:
+#        if model.include_lex:
+#            z = batch[2].to(device)
+#        else:
+#            z = None
+
+        if isinstance(model, nn.DataParallel):
+            inc_lex = model.module.include_lex
+        else:
+            inc_lex = model.include_lex
+
+        if inc_lex:
             z = batch[2].to(device)
         else:
             z = None
