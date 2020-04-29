@@ -2,7 +2,8 @@
 import numpy as np
 import torch.nn.functional as F
 
-from torch import nn, torch
+from torch import nn
+import torch
 
 from LexTransformer.Modules import MultiHeadAttention, LexiconMultiHeadAttention, PointwiseFF
 
@@ -45,7 +46,7 @@ class LexiconTransformerEncoder(nn.Module):
         
     def forward(self, X, z, pad_mask=None, pad_mask_l=None, context_mask=None):
         
-        output, attention_context, attention_lexicon = self.mh_attn(X, X, X, z, z, 
+        output, attention_context, attention_lexicon, residual = self.mh_attn(X, X, X, z, z,
                                          pad_mask=pad_mask,
                                          pad_mask_l=pad_mask_l,
                                          context_mask=context_mask) #output dim: batch * length_X * d_X
@@ -53,10 +54,10 @@ class LexiconTransformerEncoder(nn.Module):
         #attention dim: batch * nh * l_q * l_k
         
         norm = X.ne(0.0).any(axis=2).type(torch.float).unsqueeze(-1)
-        output *= norm
+        # output *= norm
         
         
         output = self.linear(output) #batch * length * dx
         output *= norm
         
-        return output, attention_context, attention_lexicon
+        return output, attention_context, attention_lexicon, residual

@@ -3,8 +3,8 @@ import torch
 import torch.nn as nn
 import numpy as np
 
-from LexTransformer.Modules import Embed, PosEmbed
-from LexTransformer.Encoders import TransformerEncoder, LexiconTransformerEncoder
+from .Modules import Embed, PosEmbed
+from .Encoders import TransformerEncoder
 
 class Encoder(nn.Module):
     def __init__(self, 
@@ -52,17 +52,19 @@ class Encoder(nn.Module):
         encoded = embedded
         
         if self.include_lex:
+            count = 0
             for _transformer in self.transformers:
-                encoded, attn_con, attn_lex = _transformer(encoded, embedded_z, 
+                encoded, attn_con, attn_lex, residual = _transformer(encoded, embedded_z,
                                                       pad_mask=pad_mask, 
                                                       pad_mask_l=pad_mask_l, 
                                                       context_mask=context_mask)
+                count += 1
         else:
             for _transformer in self.transformers:
                 encoded, attn_con = _transformer(encoded, pad_mask=pad_mask)
             attn_lex = None
         
-        return encoded, attn_con, attn_lex
+        return encoded, attn_con, attn_lex, residual
         
     @staticmethod
     
@@ -83,7 +85,7 @@ class DenseLayers(nn.Module):
         super(DenseLayers, self).__init__()
         self.dense = nn.Linear(in_features=dim,
                                 out_features=n_logits)
-        
+        nn.init.xavier_normal_(self.dense.weight)
     
     def forward(self, X):
         return self.dense(X)
@@ -120,7 +122,7 @@ class LexiconTransformerClassifier(nn.Module):
         self.dense_layer = DenseLayers(dim=emb_dim, n_logits=n_logits)
 
     def forward(self, X, z=None, context_mask=None):
-        encoded, attn_con, attn_lex = self.encoder(X=X, z=z, 
+        encoded, attn_con, attn_lex, residual = self.encoder(X=X, z=z,
                                                    context_mask=context_mask) #batch * length * emb_dim
         
 #        encoded = encoded.view(-1, self.length * self.emb_dim) #batch * (length*emb_dim)
@@ -128,6 +130,6 @@ class LexiconTransformerClassifier(nn.Module):
 
         logits = self.dense_layer(encoded)
         
-        return logits, attn_con, attn_lex
+        return logits, attn_con, attn_lex, residual
         
         

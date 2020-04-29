@@ -2,7 +2,8 @@
 
 import numpy as np
 import torch.nn.functional as F
-from torch import nn, torch
+from torch import nn
+import torch
 
 
 class Embed(nn.Module):
@@ -90,17 +91,18 @@ class PosEmbed(nn.Module):
     
     
 class ScaledDotProductAttention(nn.Module):
-    def __init__(self, d_k, dropout=.1):
+    def __init__(self, d_k, num_head,dropout=.1):
         
         super(ScaledDotProductAttention, self).__init__()
         self.reg = np.sqrt(d_k)
+        self.num_head = num_head
         self.dropout = nn.Dropout(dropout)
         self.softmax = nn.Softmax(dim=2) #input tensor dim: (batch, seq_length, seq_length)
         
     
     def forward(self, q, k, v, pad_mask=None, context_mask=None):
         
-        attention = torch.bmm(q, k.transpose(1, 2)) #dim of q and k: (batch, seq_length, d_k * n_head)
+        attention = torch.bmm(q, k.transpose(1, 2)) #dim of q and k: (batch * n_head, seq_length)
         attention /= self.reg
         
         if pad_mask is not None:
@@ -108,13 +110,28 @@ class ScaledDotProductAttention(nn.Module):
             
         attention = self.softmax(attention)
         attention = self.dropout(attention)
-        
+
+        if pad_mask is not None:
+            attention = attention.masked_fill(pad_mask, 0) #see Attention is all you need 3.2.3
+
         if context_mask is not None: #context masking
             attention *= context_mask
-        
+        # attention residual
+        residual = 0
+        if self.num_head > 1:
+            _length_1 = attention.shape[1]
+            _length_2 = attention.shape[2]
+            _attn = attention.contiguous().view(self.num_head, -1, _length_1, _length_2)
+            for m, left in enumerate(_attn):
+                for n, right in enumerate(_attn):
+                    if not m == n:
+                        residual += torch.sum(torch.abs(left * right)) / _length_1
+            residual = residual/self.num_head/self.num_head/2
+
+
         output = torch.bmm(attention, v)
         
-        return output, attention
+        return output, attention, residual
 
 
     
@@ -129,12 +146,12 @@ class MultiHeadAttention(nn.Module):
         self.wv = nn.Linear(d_x, num_head * d_k)
 
         
-        #initialization problems?
-#        nn.init.normal_(self.wq.weight, mean=0, std=np.sqrt(2.0 / (d_x + d_k)))
-#        nn.init.normal_(self.wk.weight, mean=0, std=np.sqrt(2.0 / (d_x + d_k)))
-#        nn.init.normal_(self.wv.weight, mean=0, std=np.sqrt(2.0 / (d_x + d_k)))
-        
-        self.sdp_attn = ScaledDotProductAttention(d_k=d_k, dropout=dropout)
+
+        nn.init.xavier_normal_(self.wq.weight)
+        nn.init.xavier_normal_(self.wk.weight)
+        nn.init.xavier_normal_(self.wv.weight)
+
+        self.sdp_attn = ScaledDotProductAttention(d_k=d_k, num_head=num_head, dropout=dropout)
         
         self.dropout = nn.Dropout(dropout)
         self.norm = nn.LayerNorm(d_x)
@@ -151,26 +168,27 @@ class MultiHeadAttention(nn.Module):
         
         q = self.wq(q).view(-1, length_q, self.num_head, self.d_k) #batch * length * num_head * d_k
         k = self.wk(k).view(-1, length_k, self.num_head, self.d_k)
-        v = self.wv(v).view(-1, length_k, self.num_head, self.d_k) 
-        
-        q = q.permute(0, 2, 1, 3).contiguous().view(-1, length_q, self.d_k) # (batch * num_head) * length * d_k
-        k = k.permute(0, 2, 1, 3).contiguous().view(-1, length_k, self.d_k)
-        v = v.permute(0, 2, 1, 3).contiguous().view(-1, length_k, self.d_k)
+        v = self.wv(v).view(-1, length_k, self.num_head, self.d_k)
+
+        q = q.permute(2, 0, 1, 3).contiguous().view(-1, length_q, self.d_k)  # (batch * num_head) * length * d_k
+        k = k.permute(2, 0, 1, 3).contiguous().view(-1, length_k, self.d_k)
+        v = v.permute(2, 0, 1, 3).contiguous().view(-1, length_k, self.d_k)
         
         if pad_mask is not None:
             pad_mask = pad_mask.repeat(self.num_head, 1, 1) # batch * length_q * length_k -> (batch * num_head) * l_q * l_k
 
-        output, attention = self.sdp_attn(q, k, v, 
+        output, attention, _ = self.sdp_attn(q, k, v, 
                                           pad_mask=pad_mask) 
         #output: (batch*nh) * length_q * d_k
         #attention: (batch*nh) * length_q * length_k
-        
-        output = output.view(-1, self.num_head, length_q, self.d_k) #batch * nh * l_q * d_k
-        output = output.permute(0, 2, 1, 3).contiguous().view(-1, length_q, self.num_head * self.d_k) #batch * l_q * (nh * d_k)
-        
+
+        output = output.view(self.num_head, -1, length_q, self.d_k)  # nh * batch * l_q * d_k
+        output = output.permute(1, 2, 0, 3).contiguous().view(-1, length_q,
+                                                              self.num_head * self.d_k)  # batch * l_q * (nh * d_k)
+
         output = self.norm(self.dropout(self.wo(output)) + X) #batch * l_q * d_x
         
-        attention = attention.view(-1, self.num_head, length_q, length_k) #batch * nh * l_q * l_k
+        attention = attention.view(self.num_head, -1, length_q, length_k).permute(1, 0, 2, 3) #batch * nh * l_q * l_k
         
         return output, attention
     
@@ -192,15 +210,20 @@ class LexiconMultiHeadAttention(nn.Module):
         self.wvl = nn.Linear(d_x, num_head * d_kl)  
         
         #initialization problems?
+        nn.init.xavier_normal_(self.wq.weight)
+        nn.init.xavier_normal_(self.wk.weight)
+        nn.init.xavier_normal_(self.wv.weight)
+        nn.init.xavier_normal_(self.wkl.weight)
+        nn.init.xavier_normal_(self.wvl.weight)
         
-        self.sdp_attn_context = ScaledDotProductAttention(d_k=d_k, dropout=dropout)
-        self.sdp_attn_lex = ScaledDotProductAttention(d_k=d_kl, dropout=dropout)
+        self.sdp_attn_context = ScaledDotProductAttention(d_k=d_k, num_head=num_head, dropout=dropout)
+        self.sdp_attn_lex = ScaledDotProductAttention(d_k=d_kl, num_head=num_head, dropout=dropout)
         
         self.dropout = nn.Dropout(dropout)
         self.norm = nn.LayerNorm(d_x)
         
         self.wo = nn.Linear(num_head * d_k, d_x)
-#         nn.init.xavier_normal_(self.wo.weight)
+        nn.init.xavier_normal_(self.wo.weight)
         
     
     def forward(self, q, k, v, kl, vl, 
@@ -225,13 +248,25 @@ class LexiconMultiHeadAttention(nn.Module):
         
         
         
-        q = q.permute(0, 2, 1, 3).contiguous().view(-1, length_q, self.d_k) # (batch * num_head) * length * d_k
+        q = q.permute(2, 0, 1, 3).contiguous().view(-1, length_q, self.d_k) # (batch * num_head) * length * d_k
         
-        k = k.permute(0, 2, 1, 3).contiguous().view(-1, length_k, self.d_k)
-        v = v.permute(0, 2, 1, 3).contiguous().view(-1, length_k, self.d_k)
-        
-        kl = kl.permute(0, 2, 1, 3).contiguous().view(-1, length_kl, self.d_kl)
-        vl = vl.permute(0, 2, 1, 3).contiguous().view(-1, length_kl, self.d_kl)
+        k = k.permute(2, 0, 1, 3).contiguous().view(-1, length_k, self.d_k)
+        v = v.permute(2, 0, 1, 3).contiguous().view(-1, length_k, self.d_k)
+        # value residual
+        residual = 0
+        # if self.num_head > 1:
+        #
+        #     _v = v.contiguous().view(self.num_head, -1, length_k, self.d_k)
+        #     _sim = torch.nn.CosineSimilarity(dim=2)
+        #     for m, left in enumerate(_v):
+        #         for n, right in enumerate(_v):
+        #             if not m == n:
+        #                 residual += (torch.sum(torch.abs(_sim(left, right)))) / left.shape[0]
+        #     residual /= 2
+        #     residual = residual/self.num_head/self.num_head
+
+        kl = kl.permute(2, 0, 1, 3).contiguous().view(-1, length_kl, self.d_kl)
+        vl = vl.permute(2, 0, 1, 3).contiguous().view(-1, length_kl, self.d_kl)
         
         
         if pad_mask is not None:
@@ -241,30 +276,31 @@ class LexiconMultiHeadAttention(nn.Module):
             pad_mask_l = pad_mask_l.repeat(self.num_head, 1, 1)
             
         if context_mask is not None:
-            value_mask = value_mask.repeat(self.num_head, 1, 1)
+            context_mask = context_mask.repeat(self.num_head, 1, 1)
             
-        output_context, attention_context = self.sdp_attn_context(q, k, v, 
+        output_context, attention_context, a_res_context = self.sdp_attn_context(q, k, v,
                                                                   pad_mask=pad_mask)
         
-        output_lexicon, attention_lexicon = self.sdp_attn_lex(q, kl, vl, 
+        output_lexicon, attention_lexicon, a_res_lexicon = self.sdp_attn_lex(q, kl, vl,
                                                          pad_mask=pad_mask_l,
                                                          context_mask=context_mask)
         
         output = alpha * output_context + (1 - alpha) * output_lexicon
-        
+
+        residual += a_res_context
         
         #output: (batch*nh) * length_q * d_k
         #attention: (batch*nh) * length_q * length_k
         
-        output = output.view(-1, self.num_head, length_q, self.d_k) #batch * nh * l_q * d_k
-        output = output.permute(0, 2, 1, 3).contiguous().view(-1, length_q, self.num_head * self.d_k) #batch * l_q * (nh * d_k)
+        output = output.view(self.num_head, -1, length_q, self.d_k) #nh * batch * l_q * d_k
+        output = output.permute(1, 2, 0, 3).contiguous().view(-1, length_q, self.num_head * self.d_k) #batch * l_q * (nh * d_k)
         
         output = self.norm(self.dropout(self.wo(output)) + X) #batch * l_q * d_x
         
-        attention_context = attention_context.view(-1, self.num_head, length_q, length_k) #batch * nh * l_q * l_k
-        attention_lexicon = attention_lexicon.view(-1, self.num_head, length_q, length_kl) #batch * nh * l_q * l_k
+        attention_context = attention_context.view(self.num_head, -1, length_q, length_k).permute(1, 0, 2, 3)#batch * nh * l_q * l_k
+        attention_lexicon = attention_lexicon.view(self.num_head, -1, length_q, length_kl).permute(1, 0, 2, 3)#batch * nh * l_q * l_k
         
-        return output, attention_context, attention_lexicon
+        return output, attention_context, attention_lexicon, residual
     
     
     
@@ -273,6 +309,10 @@ class PointwiseFF(nn.Module):
         super(PointwiseFF, self).__init__()
         self.w1 = nn.Conv1d(d_x, d_ff, 1)
         self.w2 = nn.Conv1d(d_ff, d_x, 1)
+
+        nn.init.xavier_normal_(self.w1.weight)
+        nn.init.xavier_normal_(self.w2.weight)
+
         self.dropout = nn.Dropout(dropout)
         self.norm = nn.LayerNorm(d_x)
         

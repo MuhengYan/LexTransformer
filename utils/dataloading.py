@@ -159,10 +159,7 @@ class LocalDataset(BaseDataset):
         if isinstance(y, (list, tuple)):
             y = np.array(y)
 
-            
-            
-        #         , len(self.X[index]), index
-        return X, y, z
+        return X, y, z, len(self.X[index])
     
     
     @staticmethod
@@ -183,9 +180,83 @@ class LocalDataset(BaseDataset):
                 else:
                     raise ValueError('UNK policy not recognized!')
         return seq_vec
-        
-        
-        
+
+
+class GlobalDataset(BaseDataset):
+
+    def __init__(self,
+                 X, y, z,
+                 word2idx,
+                 length=None, length_z=None, name=None,
+                 verbose=True):
+        self.word2idx = word2idx
+        self.length_z = length_z
+        BaseDataset.__init__(self, X, y, z, length, name, verbose)
+
+    def stats(self):
+        vocab = []
+        unk = []
+
+        for seq in self.X:
+            for token in seq:
+                vocab.append(token)
+                if token not in self.word2idx:
+                    unk.append(token)
+
+        labels = {}
+        for lab in self.y:
+            if np.argmax(lab) in labels:
+                labels[np.argmax(lab)] += 1
+            else:
+                labels[np.argmax(lab)] = 1
+
+        print()
+        print('Dataset:', self.name)
+        print('Total #token:', len(vocab), 'Total #UNK:', len(unk), '{:.2f}%'.format(100 * len(unk) / len(vocab)))
+        print('Unique #token:', len(set(vocab)), 'Unique #UNK:', len(set(unk)),
+              '{:.2f}%'.format(100 * len(set(unk)) / len(set(vocab))))
+        print('Label Distribution:')
+        for key in labels:
+            print(key, ':', labels[key])
+        print()
+
+    def __len__(self):
+
+        assert len(self.X) == len(self.y) and len(self.X) == len(self.z)
+
+        return len(self.X)
+
+    def __getitem__(self, index):
+        X, y, z = self.X[index], self.y[index], self.z[index]
+
+        X = self._to_vector(X, self.word2idx, self.length, unk_pol='random')
+        z = self._to_vector(z, self.word2idx, self.length_z, unk_pol='zero')
+
+        if isinstance(y, (list, tuple)):
+            y = np.array(y)
+
+        return X, y, z, len(self.X[index])
+
+    @staticmethod
+    def _to_vector(sequence, word2idx, length, unk_pol='random'):
+
+        seq_vec = np.zeros(length).astype(int)
+
+        for i, token in enumerate(sequence[:length]):
+            if token in word2idx:
+                seq_vec[i] = word2idx[token]
+            elif token.lower() in word2idx:
+                seq_vec[i] = word2idx[token.lower()]
+            else:
+                if unk_pol == 'random':
+                    seq_vec[i] = word2idx['<UNK>']
+                elif unk_pol == 'zero':
+                    seq_vec[i] = 0
+                else:
+                    raise ValueError('UNK policy not recognized!')
+        return seq_vec
+
+
 class PlainDataset(BaseDataset):
     
     def __init__(self, 
@@ -238,8 +309,7 @@ class PlainDataset(BaseDataset):
        
         if isinstance(y, (list, tuple)):
             y = np.array(y)
-
-        return X, y
+        return X, y, len(self.X[index])
     
     
     @staticmethod
